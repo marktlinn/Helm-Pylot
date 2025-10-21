@@ -7,7 +7,7 @@ from ..logger import logger
 
 # Constants and Env Vars
 TEMP_CHART_PATH = "/tmp/downloaded_chart.tgz"
-REPO_URL = os.environ.get("REPO_URL")
+
 
 type RunCmdFunc = Callable[[list[str]], None]
 
@@ -17,7 +17,7 @@ class ChartSourceType(StrEnum):
     PRIVATE = "PRIVATE_BUCKET"
 
 
-class Charts:
+class ChartArtifactManager:
     def __init__(self, run_cmd: RunCmdFunc):
         self.run_cmd = run_cmd
 
@@ -33,14 +33,15 @@ class Charts:
 
         match src_type:
             case ChartSourceType.PUBLIC:
-                if not REPO_URL:
+                repo_url = os.environ.get("REPO_URL")
+                if not repo_url:
                     raise ValueError(
                         "REPO_URL environment variable required for PUBLIC_REPO"
                     )
 
                 repo_name = "REPO_NAME"  # TODO: take name dynamically
 
-                self.run_cmd(["helm", "repo", "add", repo_name, REPO_URL])
+                self.run_cmd(["helm", "repo", "add", repo_name, repo_url])
                 self.run_cmd(["helm", "repo", "update"])
 
                 self.run_cmd(
@@ -72,3 +73,27 @@ class Charts:
                 raise ValueError(
                     f"Unsupported 'src_type' for chart: '{src_type}' - expects one of {ChartSourceType.PRIVATE}, {ChartSourceType.PUBLIC}"
                 )
+
+    def deploy_chart(self, chart_path: str, release_name: str, namespace: str) -> None:
+        cmds = [
+            "helm",
+            "upgrade",
+            "--install",
+            release_name,
+            chart_path,
+            "--namespace",
+            namespace,
+            "--atomic",  # ensure all of nothing
+            "--wait",  # TODO: make optional
+        ]
+
+        values_file_path = os.environ.get("HELM_VALUES_FILE")
+        if values_file_path and os.path.exists(values_file_path):
+            logger.info(f"Applying override values from file: {values_file_path}")
+            cmds.extend(["-f", values_file_path])
+        elif values_file_path:
+            logger.warning(
+                f"HELM_VALUES_FILE specified, but file not found at path '{values_file_path}'"
+            )
+
+        self.run_cmd(cmds)
